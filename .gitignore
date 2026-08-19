@@ -1,0 +1,17 @@
+# Secrets Streamlit — ne jamais committer la vraie clé
+# (le fichier .example reste versionné, pas celui-ci)
+.streamlit/secrets.toml
+
+# Environnements virtuels
+.venv/
+venv/
+env/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# Fichiers sensibles / locaux
+.env
+.DS_Store
