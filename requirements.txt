@@ -1,2 +1,3 @@
 streamlit>=1.45
 groq>=0.14
+firecrawl-py>=2.0

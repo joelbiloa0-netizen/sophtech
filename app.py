@@ -9,6 +9,8 @@ Rôle  : répondre aux questions de culture informatique / numérique / tech
         tech, métiers du numérique) avec un ton de vulgarisateur.
 """
 
+import json
+
 import groq
 import streamlit as st
 from groq import Groq
@@ -72,6 +74,33 @@ PROMPTS_NIVEAU = {
     "Expert": "tu peux être précis et technique, la personne a des bases solides",
 }
 
+# Tool function calling (standard OpenAI-compatible, PAS browser_search) :
+# permet au modèle de demander une recherche web quand c'est pertinent.
+OUTIL_RECHERCHE_WEB = [
+    {
+        "type": "function",
+        "function": {
+            "name": "rechercher_web",
+            "description": (
+                "Recherche des informations récentes sur le web. À utiliser "
+                "UNIQUEMENT pour des questions sur l'actualité, des événements "
+                "récents, des versions logicielles récentes, ou des faits précis "
+                "(dates, noms, chiffres) dont tu n'es pas sûr à 100%."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "requete": {
+                        "type": "string",
+                        "description": "la requête de recherche à utiliser",
+                    }
+                },
+                "required": ["requete"],
+            },
+        },
+    }
+]
+
 
 # ---------------------------------------------------------------------------
 # Fonctions
@@ -83,11 +112,43 @@ def construire_system_prompt(niveau: str) -> str:
         "numérique (matériel, logiciels, internet, cybersécurité, intelligence "
         "artificielle, histoire de la tech, métiers du numérique). Tu expliques de "
         "façon claire et accessible, avec des exemples concrets, sans jargon "
-        f"inutile. Adapte ton niveau d'explication : {PROMPTS_NIVEAU[niveau]}. "
+        f"inutile. Adapte ton niveau d'explication : {PROMPTS_NIVEAU[niveau]}.\n\n"
+        "Règles de format : réponds de façon concise, 2 à 5 phrases dans la majorité "
+        "des cas. N'utilise des tableaux, listes à puces ou sections numérotées QUE "
+        "si on te le demande explicitement ou si la question l'exige clairement. Pas "
+        "de longue introduction ni de récapitulatif en fin de réponse.\n\n"
+        "Règle d'honnêteté : tes connaissances s'arrêtent autour de mi-2024. Si on "
+        "te pose une question sur un événement récent, une actualité, une version "
+        "logicielle récente, ou un fait précis (date, nom, chiffre) dont tu n'es pas "
+        "certain, dis-le clairement et brièvement plutôt que d'inventer une réponse "
+        "qui a l'air précise. Ne construis jamais de tableau récapitulatif de faits "
+        "si tu n'es pas sûr à 100% de chaque ligne.\n\n"
         "Si la question posée n'a AUCUN rapport avec l'informatique ou le numérique, "
         "réponds poliment que ce n'est pas ton domaine et invite à reformuler autour "
-        "de la tech."
+        "de la tech.\n\n"
+        "Tu as accès à un outil de recherche web (rechercher_web). Utilise-le "
+        "uniquement quand la question porte sur l'actualité, des événements récents, "
+        "ou des faits précis dont tu n'es pas sûr. Pour les questions générales et "
+        "intemporelles, réponds directement sans chercher. Quand tu utilises des "
+        "résultats de recherche, base ta réponse dessus et cite brièvement 1 à 2 "
+        "sources (juste le nom du site)."
     )
+
+
+def rechercher_web(requete: str) -> str:
+    """Cherche sur le web via Firecrawl et retourne un résumé texte des résultats."""
+    try:
+        from firecrawl.v2 import FirecrawlClient
+        firecrawl = FirecrawlClient(api_key=st.secrets["FIRECRAWL_API_KEY"])
+        resultats = firecrawl.search(query=requete, limit=5)
+        if not resultats.web:
+            return "Aucun résultat trouvé pour cette recherche."
+        texte = ""
+        for r in resultats.web:
+            texte += f"- {r.title} ({r.url}): {r.description}\n"
+        return texte
+    except Exception:
+        return "La recherche web n'est pas disponible pour le moment."
 
 
 def traiter_question(question: str) -> None:
@@ -107,15 +168,54 @@ def traiter_question(question: str) -> None:
     #    l'historique déjà affiché n'est pas modifié).
     system_prompt = construire_system_prompt(st.session_state["niveau"])
 
-    # 3. Appel API : system prompt en PREMIER message de la liste,
-    #    suivi de l'historique complet (rôles user/assistant).
+    # 3. Appel API : system prompt en PREMIER message de la liste, suivi de
+    #    l'historique complet (rôles user/assistant). Le tool rechercher_web
+    #    est proposé au modèle (function calling standard), qui décide seul
+    #    de l'utiliser ou non.
     try:
+        messages_api = [{"role": "system", "content": system_prompt}] + st.session_state[
+            "messages"
+        ]
+
         completion = client.chat.completions.create(
             model="openai/gpt-oss-120b",
-            messages=[{"role": "system", "content": system_prompt}]
-            + st.session_state["messages"],
+            messages=messages_api,
+            max_completion_tokens=600,
+            reasoning_effort="low",
+            tools=OUTIL_RECHERCHE_WEB,
+            tool_choice="auto",
         )
-        reponse = completion.choices[0].message.content
+        message_reponse = completion.choices[0].message
+
+        if message_reponse.tool_calls:
+            # Le modèle demande une recherche web : exécution de chaque appel,
+            # puis deuxième requête avec le tool call et les résultats renvoyés.
+            messages_api.append(message_reponse)
+            for tool_call in message_reponse.tool_calls:
+                arguments = json.loads(tool_call.function.arguments)
+                resultat = rechercher_web(arguments["requete"])
+                messages_api.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": tool_call.id,
+                        "content": resultat,
+                    }
+                )
+
+            # Deuxième appel SANS tools : la réponse finale ne peut plus redemander
+            # une recherche, la boucle s'arrête forcément ici.
+            completion_finale = client.chat.completions.create(
+                model="openai/gpt-oss-120b",
+                messages=messages_api,
+                max_completion_tokens=600,
+                reasoning_effort="low",
+            )
+            reponse = completion_finale.choices[0].message.content
+        else:
+            reponse = message_reponse.content
+
+        # Seul le TEXTE final est ajouté à l'historique, jamais les détails du
+        # tool call — exactement comme avant.
         st.session_state["messages"].append({"role": "assistant", "content": reponse})
 
     # Clé invalide / expirée : réponse d'erreur visible dans le chat
