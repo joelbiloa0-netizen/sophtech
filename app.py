@@ -126,12 +126,17 @@ def construire_system_prompt(niveau: str) -> str:
         "Si la question posée n'a AUCUN rapport avec l'informatique ou le numérique, "
         "réponds poliment que ce n'est pas ton domaine et invite à reformuler autour "
         "de la tech.\n\n"
-        "Tu as accès à un outil de recherche web (rechercher_web). Utilise-le "
-        "uniquement quand la question porte sur l'actualité, des événements récents, "
-        "ou des faits précis dont tu n'es pas sûr. Pour les questions générales et "
-        "intemporelles, réponds directement sans chercher. Quand tu utilises des "
-        "résultats de recherche, base ta réponse dessus et cite brièvement 1 à 2 "
-        "sources (juste le nom du site)."
+        "Tu as accès à un outil de recherche web (rechercher_web). "
+        "Certaines questions semblent simples mais deviennent vite obsolètes : la "
+        "dernière version d'un logiciel ou langage, le prix actuel d'un produit, "
+        "qui occupe un poste ou un rôle en ce moment, un classement ou une "
+        "statistique à jour, une actualité récente. Pour ce type de question, utilise "
+        "TOUJOURS rechercher_web — même si tu as l'impression de connaître la réponse, "
+        "car tes connaissances ont une date de coupure et ont pu devenir fausses "
+        "depuis. Ne réponds directement, sans chercher, que pour des faits stables : "
+        "définitions, concepts, principes de fonctionnement, histoire ancienne. "
+        "Quand tu utilises des résultats de recherche, base ta réponse dessus et cite "
+        "brièvement 1 à 2 sources (juste le nom du site)."
     )
 
 
