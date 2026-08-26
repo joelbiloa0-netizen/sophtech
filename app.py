@@ -10,6 +10,7 @@ Rôle  : répondre aux questions de culture informatique / numérique / tech
 """
 
 import json
+import re
 
 import groq
 import streamlit as st
@@ -156,7 +157,18 @@ def rechercher_web(requete: str) -> str:
         return "La recherche web n'est pas disponible pour le moment."
 
 
-def traiter_question(question: str) -> None:
+def doit_chercher(question: str) -> bool:
+    """Détecte si la question porte sur un sujet volatile (actualité, prix, version...)."""
+    mots_cles = re.compile(
+        r"dernière|dernier|récent|récente|actuel|actuelle|aujourd|maintenant|"
+        r"ce (mois|année)|prix|coût|coute|version|update|sorti|sortie|publié|publiée|"
+        r"nomme|élu|élue|classé|classée|classement|"
+        r"qui est|qui a|qui occupe|qui dirige|qui est le|qui est la|"
+        r"depuis quand|combien coûte|combien coute|"
+        r"latest|current|price|version|who is|latest version|recent",
+        re.IGNORECASE,
+    )
+    return bool(mots_cles.search(question))
     """
     Ajoute la question à l'historique, appelle l'API Groq et ajoute la réponse.
 
@@ -171,12 +183,32 @@ def traiter_question(question: str) -> None:
     # 2. Construction du system prompt avec le niveau sélectionné
     system_prompt = construire_system_prompt(st.session_state["niveau"])
 
-    # 3. Appel API avec tool calling standard : le modèle décide seul
-    #    quand il a besoin de rechercher sur le web.
+    # 3. Appel API avec tool calling + fallback code : on détecte les questions
+    #    d'actualité côté code pour garantir la recherche, et on garde le tool
+    #    calling en parallèle (belt and suspenders).
     try:
+        # Détection côté code des questions d'actualité
+        contexte_recherche = ""
+        if doit_chercher(question):
+            contexte_recherche = rechercher_web(question)
+
         messages_api = [{"role": "system", "content": system_prompt}] + st.session_state[
             "messages"
         ]
+
+        # Injection du contexte de recherche si disponible
+        if contexte_recherche:
+            messages_api.append(
+                {
+                    "role": "user",
+                    "content": (
+                        f"[Résultats de recherche web pour ta question]\n"
+                        f"{contexte_recherche}\n\n"
+                        "En te basant sur ces résultats, réponds à la question de "
+                        "l'utilisateur. Cite brièvement 1 à 2 sources (juste le nom du site)."
+                    ),
+                }
+            )
 
         # Premier appel avec tools
         completion = client.chat.completions.create(
@@ -189,6 +221,7 @@ def traiter_question(question: str) -> None:
         message_reponse = completion.choices[0].message
 
         # Log de débogage (visible dans la sidebar)
+        st.sidebar.write("Recherche injectée :", "Oui" if contexte_recherche else "Non")
         st.sidebar.write("Tool calls reçus :", message_reponse.tool_calls)
 
         if message_reponse.tool_calls:
