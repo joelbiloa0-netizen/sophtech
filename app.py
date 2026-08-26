@@ -10,6 +10,7 @@ Rôle  : répondre aux questions de culture informatique / numérique / tech
 """
 
 import json
+import re
 
 import groq
 import streamlit as st
@@ -156,6 +157,18 @@ def rechercher_web(requete: str) -> str:
         return "La recherche web n'est pas disponible pour le moment."
 
 
+def doit_chercher(question: str) -> bool:
+    """Détecte si la question porte sur un sujet volatile (actualité, prix, version...)."""
+    mots_cles = re.compile(
+        r"dernière|dernier|récent|actuel|aujourd'hui|maintenant|ce (mois|année)|"
+        r"prix|coût|version|update|sorti|publié|nomme|élu|classé|classement|"
+        r"qui est|qui a|depuis quand|combien coûte|combien coute|"
+        r"latest|current|price|version|who is",
+        re.IGNORECASE,
+    )
+    return bool(mots_cles.search(question))
+
+
 def traiter_question(question: str) -> None:
     """
     Ajoute la question à l'historique, appelle l'API Groq et ajoute la réponse.
@@ -174,13 +187,32 @@ def traiter_question(question: str) -> None:
     system_prompt = construire_system_prompt(st.session_state["niveau"])
 
     # 3. Appel API : system prompt en PREMIER message de la liste, suivi de
-    #    l'historique complet (rôles user/assistant). Le tool rechercher_web
-    #    est proposé au modèle (function calling standard), qui décide seul
-    #    de l'utiliser ou non.
+    #    l'historique complet (rôles user/assistant). Si la question semble
+    #    porter sur un sujet volatile (actualité, version, prix...), on cherche
+    #    sur le web AVANT d'appeler le LLM et on injecte le résultat comme
+    #    contexte — plus fiable que de laisser le modèle décider seul.
     try:
+        # Détection côté code des questions d'actualité
+        contexte_recherche = ""
+        if doit_chercher(question):
+            contexte_recherche = rechercher_web(question)
+
+        # Construction des messages : system prompt + historique
         messages_api = [{"role": "system", "content": system_prompt}] + st.session_state[
             "messages"
         ]
+
+        # Si une recherche a été faite, on injecte le résultat comme contexte
+        # ajouté à la fin (après la question user) pour que le modèle le lise.
+        if contexte_recherche:
+            messages_api.append(
+                {
+                    "role": "user",
+                    "content": f"[Résultats de recherche web pour ta question]\n{contexte_recherche}\n\n"
+                    "En te basant sur ces résultats, réponds à la question de l'utilisateur. "
+                    "Cite brièvement 1 à 2 sources (juste le nom du site).",
+                }
+            )
 
         completion = client.chat.completions.create(
             model="openai/gpt-oss-120b",
