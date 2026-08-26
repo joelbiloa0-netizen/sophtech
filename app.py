@@ -11,6 +11,7 @@ Rôle  : répondre aux questions de culture informatique / numérique / tech
 
 import json
 import re
+import time
 from datetime import date
 
 import groq
@@ -149,6 +150,11 @@ def construire_system_prompt(niveau: str) -> str:
         "- Base ta réponse UNIQUEMENT sur ces résultats ; n'invente JAMAIS un nom "
         "de modèle ou de produit, une version, une date ou un chiffre absent des "
         "résultats.\n"
+        "- Quand un résultat mentionne un nom de modèle ou de produit, utilise "
+        "EXACTEMENT ce nom, mot à mot, sans ajouter de numéro de version, de "
+        "surnom ou de description absente du résultat.\n"
+        "- Si les résultats donnent des noms conflictuels pour la même chose, "
+        "indique-le et ne choisis pas un nom inventé.\n"
         "- Compare chaque résultat à la date du jour : privilégie les plus récents "
         "(moins de 6 mois idéalement) et ignore ceux visiblement dépassés.\n"
         "- Cite brièvement 1 à 2 sources (juste le nom du site).\n"
@@ -185,6 +191,26 @@ def doit_chercher(question: str) -> bool:
         re.IGNORECASE,
     )
     return bool(mots_cles.search(question))
+
+
+def _appel_api_groq(messages, tools=None, tool_choice=None, tentatives=3):
+    """Appel API Groq avec retry automatique sur rate limit."""
+    for tentative in range(tentatives):
+        try:
+            kwargs = {
+                "model": "openai/gpt-oss-120b",
+                "messages": messages,
+                "max_completion_tokens": 800,
+            }
+            if tools:
+                kwargs["tools"] = tools
+                kwargs["tool_choice"] = tool_choice or "auto"
+            return client.chat.completions.create(**kwargs)
+        except groq.RateLimitError:
+            if tentative < tentatives - 1:
+                time.sleep(2 * (tentative + 1))
+            else:
+                raise
 
 
 def traiter_question(question: str) -> None:
@@ -230,10 +256,8 @@ def traiter_question(question: str) -> None:
             )
 
         # Premier appel avec tools
-        completion = client.chat.completions.create(
-            model="openai/gpt-oss-120b",
+        completion = _appel_api_groq(
             messages=messages_api,
-            max_completion_tokens=800,
             tools=OUTIL_RECHERCHE_WEB,
             tool_choice="auto",
         )
@@ -255,11 +279,7 @@ def traiter_question(question: str) -> None:
                 )
 
             # Deuxième appel sans tools
-            completion_finale = client.chat.completions.create(
-                model="openai/gpt-oss-120b",
-                messages=messages_api,
-                max_completion_tokens=800,
-            )
+            completion_finale = _appel_api_groq(messages=messages_api)
             reponse = completion_finale.choices[0].message.content
         else:
             reponse = message_reponse.content
