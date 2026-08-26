@@ -169,6 +169,9 @@ def doit_chercher(question: str) -> bool:
         re.IGNORECASE,
     )
     return bool(mots_cles.search(question))
+
+
+def traiter_question(question: str) -> None:
     """
     Ajoute la question à l'historique, appelle l'API Groq et ajoute la réponse.
 
