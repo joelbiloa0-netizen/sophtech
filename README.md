@@ -7,6 +7,7 @@ Ce projet est le 3e du portfolio Data Science & IA (MyLab AI).
 ## Fonctionnalités
 
 - Chat conversationnel complet (Streamlit `chat_message` / `chat_input`)
+- Recherche web temps réel via Firecrawl : les questions d'actualité (dernières versions, prix, personnes en poste, classements…) sont enrichies automatiquement par une recherche à la date du jour, avec citation des sources
 - 3 niveaux d'explication : Débutant, Intermédiaire, Expert — le choix s'applique uniquement aux prochaines réponses, sans modifier l'historique
 - 4 questions suggérées affichées avant le premier message de la session
 - Bouton "Nouvelle conversation" pour repartir de zéro
@@ -17,12 +18,15 @@ Ce projet est le 3e du portfolio Data Science & IA (MyLab AI).
 - Python + Streamlit
 - API Groq (package officiel `groq`)
 - Modèle : `openai/gpt-oss-120b` (gratuit sur Groq, inférence rapide)
-- Clé API lue depuis `st.secrets["GROQ_API_KEY"]` — jamais de clé en dur dans le code
+- Recherche web : [Firecrawl](https://www.firecrawl.dev/) (`firecrawl-py`, plan gratuit) via function calling + détection côté code
+- Date du jour injectée dans le system prompt pour garantir des réponses à jour
+- Clés API lues depuis `st.secrets` — jamais de clé en dur dans le code
 
 ## Prérequis
 
 - Python 3.10 ou supérieur
 - Un compte Groq et une clé API gratuite ([console.groq.com/keys](https://console.groq.com/keys))
+- Un compte Firecrawl et une clé API gratuite ([firecrawl.dev](https://www.firecrawl.dev/)) — optionnel : sans elle, l'app fonctionne mais la recherche web est indisponible
 
 ## Installation
 
@@ -45,7 +49,7 @@ Ce projet est le 3e du portfolio Data Science & IA (MyLab AI).
    Copy-Item .streamlit\secrets.toml.example .streamlit\secrets.toml
    ```
 
-   Puis remplacer `votre_cle_api_groq_ici` par la vraie clé dans `.streamlit/secrets.toml`.
+   Puis remplacer les placeholders par les vraies clés dans `.streamlit/secrets.toml`.
 
 ## Lancement local
 
@@ -63,6 +67,7 @@ L'application s'ouvre sur http://localhost:8501.
 
    ```toml
    GROQ_API_KEY = "votre_cle_api_groq"
+   FIRECRAWL_API_KEY = "votre_cle_api_firecrawl"
    ```
 
 4. L'app se déploie automatiquement ; chaque push sur la branche principale déclenche une mise à jour.
@@ -72,7 +77,7 @@ L'application s'ouvre sur http://localhost:8501.
 ```
 sophtech/
 ├── app.py                          # application principale (chat, niveaux, suggestions, appels API)
-├── requirements.txt                # dépendances : streamlit, groq
+├── requirements.txt                # dépendances : streamlit, groq, firecrawl-py
 ├── .gitignore                      # exclut secrets.toml, .venv, __pycache__…
 ├── .streamlit/
 │   ├── secrets.toml                # clé API réelle (jamais commité)

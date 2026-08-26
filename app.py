@@ -11,6 +11,7 @@ Rôle  : répondre aux questions de culture informatique / numérique / tech
 
 import json
 import re
+from datetime import date
 
 import groq
 import streamlit as st
@@ -50,6 +51,14 @@ if "GROQ_API_KEY" not in st.secrets:
 
 # Client Groq (initialisé une seule fois, au niveau du module)
 client = Groq(api_key=st.secrets["GROQ_API_KEY"])
+
+# Clé Firecrawl optionnelle : sans elle, l'app fonctionne mais la recherche
+# web renverra un message d'indisponibilité (warning, pas de blocage).
+if "FIRECRAWL_API_KEY" not in st.secrets:
+    st.sidebar.warning(
+        "Clé `FIRECRAWL_API_KEY` absente : la recherche web est indisponible. "
+        "Ajoute-la dans `.streamlit/secrets.toml`."
+    )
 
 # ---------------------------------------------------------------------------
 # Constantes
@@ -118,12 +127,13 @@ def construire_system_prompt(niveau: str) -> str:
         "des cas. N'utilise des tableaux, listes à puces ou sections numérotées QUE "
         "si on te le demande explicitement ou si la question l'exige clairement. Pas "
         "de longue introduction ni de récapitulatif en fin de réponse.\n\n"
-        "Règle d'honnêteté : tes connaissances s'arrêtent autour de mi-2024. Si on "
-        "te pose une question sur un événement récent, une actualité, une version "
-        "logicielle récente, ou un fait précis (date, nom, chiffre) dont tu n'es pas "
-        "certain, dis-le clairement et brièvement plutôt que d'inventer une réponse "
-        "qui a l'air précise. Ne construis jamais de tableau récapitulatif de faits "
-        "si tu n'es pas sûr à 100% de chaque ligne.\n\n"
+        f"Règle d'honnêteté : nous sommes le {date.today().strftime('%d/%m/%Y')} et tes "
+        "connaissances internes s'arrêtent autour de mi-2024 : elles ont donc pu "
+        "devenir fausses depuis. Si on te pose une question sur un événement récent, "
+        "une actualité, une version logicielle récente, ou un fait précis (date, nom, "
+        "chiffre) dont tu n'es pas certain, dis-le clairement et brièvement plutôt "
+        "que d'inventer une réponse qui a l'air précise. Ne construis jamais de "
+        "tableau récapitulatif de faits si tu n'es pas sûr à 100% de chaque ligne.\n\n"
         "Si la question posée n'a AUCUN rapport avec l'informatique ou le numérique, "
         "réponds poliment que ce n'est pas ton domaine et invite à reformuler autour "
         "de la tech.\n\n"
@@ -132,12 +142,18 @@ def construire_system_prompt(niveau: str) -> str:
         "dernière version d'un logiciel ou langage, le prix actuel d'un produit, "
         "qui occupe un poste ou un rôle en ce moment, un classement ou une "
         "statistique à jour, une actualité récente. Pour ce type de question, utilise "
-        "TOUJOURS rechercher_web — même si tu as l'impression de connaître la réponse, "
-        "car tes connaissances ont une date de coupure et ont pu devenir fausses "
-        "depuis. Ne réponds directement, sans chercher, que pour des faits stables : "
-        "définitions, concepts, principes de fonctionnement, histoire ancienne. "
-        "Quand tu utilises des résultats de recherche, base ta réponse dessus et cite "
-        "brièvement 1 à 2 sources (juste le nom du site)."
+        "TOUJOURS rechercher_web — même si tu as l'impression de connaître la réponse. "
+        "Ne réponds directement, sans chercher, que pour des faits stables : "
+        "définitions, concepts, principes de fonctionnement, histoire ancienne.\n\n"
+        "Règles strictes quand tu utilises des résultats de recherche :\n"
+        "- Base ta réponse UNIQUEMENT sur ces résultats ; n'invente JAMAIS un nom "
+        "de modèle ou de produit, une version, une date ou un chiffre absent des "
+        "résultats.\n"
+        "- Compare chaque résultat à la date du jour : privilégie les plus récents "
+        "(moins de 6 mois idéalement) et ignore ceux visiblement dépassés.\n"
+        "- Cite brièvement 1 à 2 sources (juste le nom du site).\n"
+        "- Si les résultats ne suffisent pas à répondre avec certitude, dis-le "
+        "clairement plutôt que de compléter de mémoire."
     )
 
 
@@ -160,7 +176,7 @@ def rechercher_web(requete: str) -> str:
 def doit_chercher(question: str) -> bool:
     """Détecte si la question porte sur un sujet volatile (actualité, prix, version...)."""
     mots_cles = re.compile(
-        r"dernière|dernier|récent|récente|actuel|actuelle|aujourd|maintenant|"
+        r"dernière|dernier|récent|récente|actuel|actuelle|aujourd'hui|maintenant|"
         r"ce (mois|année)|prix|coût|coute|version|update|sorti|sortie|publié|publiée|"
         r"nomme|élu|élue|classé|classée|classement|"
         r"qui est|qui a|qui occupe|qui dirige|qui est le|qui est la|"
@@ -217,15 +233,11 @@ def traiter_question(question: str) -> None:
         completion = client.chat.completions.create(
             model="openai/gpt-oss-120b",
             messages=messages_api,
-            max_completion_tokens=600,
+            max_completion_tokens=800,
             tools=OUTIL_RECHERCHE_WEB,
             tool_choice="auto",
         )
         message_reponse = completion.choices[0].message
-
-        # Log de débogage (visible dans la sidebar)
-        st.sidebar.write("Recherche injectée :", "Oui" if contexte_recherche else "Non")
-        st.sidebar.write("Tool calls reçus :", message_reponse.tool_calls)
 
         if message_reponse.tool_calls:
             # Le modèle demande une recherche web
@@ -246,7 +258,7 @@ def traiter_question(question: str) -> None:
             completion_finale = client.chat.completions.create(
                 model="openai/gpt-oss-120b",
                 messages=messages_api,
-                max_completion_tokens=600,
+                max_completion_tokens=800,
             )
             reponse = completion_finale.choices[0].message.content
         else:
